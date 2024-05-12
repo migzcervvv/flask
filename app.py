@@ -1,46 +1,49 @@
 from flask import Flask, request, jsonify
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-import pandas as pd
 import numpy as np
 import joblib
 from tensorflow.keras.models import load_model
 import json
-from forecasting import load_and_predict  # Assuming this function is in forecasting.py
 
 app = Flask(__name__)
-creds = service_account.Credentials.from_service_account_file('creds.json')
 
-@app.route("/readSheets", methods=['POST'])
-def readSheets_API():
-    param = request.get_json()
-    sheet_range = param['range']
-    return readGsheet(sheet_range)
+# Load the model and scaler once when the server starts
+model = load_model('smog_prediction_model.keras')
+input_scaler = joblib.load('input_scaler.gz')
+output_scaler = joblib.load('output_scaler.gz')
 
-def readGsheet(sheet_range):
-    SPREADSHEET_ID = "1QY_I_7ci1pZkraeUopbVrYgI-kphveqrOKsGq890Z_w"
-    service = build("sheets", "v4", credentials=creds)
-    sheetread = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=sheet_range).execute()
-    values = sheetread.get('values', [])
-    df = pd.DataFrame(values, columns=['PM2.5', 'PM10', 'VOCS', 'CO', 'O3'])
-    df = df.apply(pd.to_numeric, errors='coerce')
-    return jsonify(df.to_dict(orient='records'))
+def load_and_predict(input_data):
+    # Scale the input data using the input scaler
+    input_data_scaled = input_scaler.transform(input_data.reshape(1, -1))
+    input_data_scaled = input_data_scaled.reshape(1, 1, -1)
+
+    # Predict using the model
+    prediction = model.predict(input_data_scaled)
+    
+    # Inverse transform the prediction using the output scaler
+    inversed_prediction = output_scaler.inverse_transform(prediction)
+    
+    # Formatting the output as JSON
+    labels = ["smog_percentage", "wind_direction", "wind_speed"]
+    result = {}
+    for i in range(3):
+        day_index = i + 1
+        result[f"day_{day_index}"] = {
+            labels[j]: float(inversed_prediction[0, i*3 + j]) for j in range(3)
+        }
+    return json.dumps(result)
 
 @app.route('/predict', methods=['GET'])
 def predict():
     try:
         predefined_data = np.array([[30.5, 22, 78, 0.6, 11]])  # Example feature set
-        predefined_data = predefined_data.reshape(1, 1, -1)  # Reshape for LSTM model: (samples, timesteps, features)
-
-        # Call the prediction function
-        result = load_and_predict(predefined_data)
-        # Convert the result into JSON format
-        return jsonify(result), 200
+        result = load_and_predict(predefined_data)  # Call the prediction function
+        return jsonify(result), 200  # Convert the result into JSON format and return
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5140)
+
     
 """
 {
