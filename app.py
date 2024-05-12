@@ -5,7 +5,8 @@ import pandas as pd
 import numpy as np
 import joblib
 from tensorflow.keras.models import load_model
-from forecasting import train_and_predict  # Ensure this import is correct
+import json
+from forecasting import load_and_predict  # Assuming this function is in forecasting.py
 
 app = Flask(__name__)
 creds = service_account.Credentials.from_service_account_file('creds.json')
@@ -26,20 +27,17 @@ def readGsheet(sheet_range):
     return jsonify(df.to_dict(orient='records'))
 
 @app.route('/predict', methods=['GET'])
-def predict_smog():
-    df = fetch_data_from_google_sheets()
-    if df.shape[0] < 24:
-        return jsonify({"error": "Not enough data to make prediction. Need at least 24 data points."})
-    predictions = train_and_predict(df, future_steps=3)  # Use the function directly
-    return jsonify(predictions.tolist())
+def predict():
+    try:
+        predefined_data = np.array([[30.5, 22, 78, 0.6, 11]])  # Example feature set
+        predefined_data = predefined_data.reshape(1, 1, -1)  # Reshape for LSTM model: (samples, timesteps, features)
 
-def fetch_data_from_google_sheets():
-    sheet = build('sheets', 'v4', credentials=creds).spreadsheets()
-    result = sheet.values().get(spreadsheetId='1QY_I_7ci1pZkraeUopbVrYgI-kphveqrOKsGq890Z_w', range='Sheet1!A2:E97').execute()
-    data = result.get('values', [])
-    df = pd.DataFrame(data, columns=['PM2.5', 'PM10', 'VOCS', 'CO', 'O3'])
-    df = df.apply(pd.to_numeric, errors='coerce')
-    return df
+        # Call the prediction function
+        result = load_and_predict(predefined_data)
+        # Convert the result into JSON format
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5140)

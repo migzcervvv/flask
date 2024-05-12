@@ -1,67 +1,105 @@
 import numpy as np
 import pandas as pd
-import logging
-import joblib
+from keras.models import Sequential, load_model
+from keras.layers import LSTM, Dense, Dropout, Bidirectional, Input
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Input
-from tensorflow.keras.optimizers import Adam
+from sklearn.model_selection import train_test_split
+import json
+import joblib
 
-# Setting up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+def load_and_preprocess_data(filepath):
+    data = pd.read_csv(filepath)
+    data['RollingMean_PM2.5'] = data['PM2.5'].rolling(window=3).mean().fillna(method='bfill')
+    features = ['RollingMean_PM2.5', 'Temperature', 'Humidity', 'WindSpeed', 'WindDirection']
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    data_scaled = scaler.fit_transform(data[features])
+    # Reshape data to include timesteps (assuming 1 timestep for simplicity here)
+    data_scaled = np.reshape(data_scaled, (data_scaled.shape[0], 1, data_scaled.shape[1]))
+    return data_scaled, scaler
 
-def prepare_data(data, n_steps, future_steps):
-    X, y = [], []
-    for i in range(len(data)):
-        end_ix = i + n_steps
-        out_end_ix = end_ix + future_steps
-        if out_end_ix > len(data):
-            break
-        seq_x, seq_y = data[i:end_ix, :], data[end_ix:out_end_ix, :]
-        X.append(seq_x)
-        y.append(seq_y)
-    return np.array(X), np.array(y)
-
-def preprocess_data(data):
-    data = data[['PM2.5', 'PM10', 'VOCS', 'CO', 'O3']]
-    scaler = MinMaxScaler()
-    scaler.fit(data)
-    data = scaler.transform(data)
-    joblib.dump(scaler, 'scaler.gz')
-    return data, scaler
-
-def build_model(input_shape, output_shape):
-    model = Sequential()
-    model.add(Input(shape=input_shape))
-    model.add(LSTM(100, activation='relu', return_sequences=True))
-    model.add(LSTM(100, activation='relu'))
-    model.add(Dense(output_shape))
-    model.compile(optimizer=Adam(learning_rate=0.01), loss='mse')
+def create_advanced_model(input_shape):
+    model = Sequential([
+        Input(shape=input_shape),
+        Bidirectional(LSTM(100, return_sequences=True)),
+        Dropout(0.3),
+        LSTM(100),
+        Dropout(0.3),
+        Dense(1)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
-def smog_occurrence_likelihood(predictions):
-    thresholds = {'PM2.5': 35, 'PM10': 50, 'VOCS': 0.6, 'CO': 9, 'O3': 70}
-    exceedances = (predictions > np.array(list(thresholds.values()))).sum(axis=1)
-    likelihood = exceedances / len(thresholds) * 100
-    return likelihood
+def train_model(model, x_train, y_train, x_val, y_val):
+    print('x_train shape:', x_train.shape)
+    print('y_train shape:', y_train.shape)
+    model.fit(x_train, y_train, validation_data=(x_val, y_val), epochs=50, batch_size=64)
+    return model  # Return the model after it has been trained
 
-def train_and_predict(data, future_steps=3):
-    data, scaler = preprocess_data(data)
-    n_steps = 24
-    X, y = prepare_data(data, n_steps, future_steps)
-    model = build_model((n_steps, X.shape[2]), future_steps * data.shape[1])
-    model.fit(X, y.reshape(y.shape[0], -1), epochs=50, batch_size=32, verbose=1)
-    predictions = model.predict(X[-1].reshape(1, n_steps, X.shape[2]))
-    predictions = predictions.reshape(future_steps, data.shape[1])
-    model.save('my_model.keras')
+def predict_and_format_output(model, data, scaler):
+    prediction = model.predict(data)
+    # Prepare a full feature set array with zeros or dummy values for all features except the target for inverse scaling
+    full_features = np.zeros((prediction.shape[0], 5))  # Assuming 5 features including the target
+    full_features[:, 0] = prediction.ravel()  # Assuming 'smog_percentage' is the first feature
+    full_features = scaler.inverse_transform(full_features)
+    smog_percentage = full_features[:, 0]  # Extract the inversely transformed target
 
-    predictions_original_scale = scaler.inverse_transform(predictions)
-    smog_likelihood = smog_occurrence_likelihood(predictions_original_scale)
-    predictions_with_likelihood = np.hstack((predictions_original_scale, smog_likelihood[:, np.newaxis]))
+    last_sequence = data[-1, -1, :]
+    wind_direction = last_sequence[4]  # Assuming wind direction is the last feature
+    wind_speed = last_sequence[3]  # Assuming wind speed is the second last feature
 
-    return predictions_with_likelihood
+    result = {
+        "smog_percentage": float(smog_percentage[0]),
+        "wind_direction": float(wind_direction),
+        "wind_speed": float(wind_speed)
+    }
+    return json.dumps(result)
 
-if __name__ == '__main__':
-    data = pd.read_csv('testdata.csv')
-    predictions = train_and_predict(data, future_steps=3)
-    print("Predictions for the next three days with smog occurrence likelihood:", predictions)
+def load_and_predict(input_data):
+    model = load_model('smog_prediction_model.h5')
+    scaler = joblib.load('smog_scaler.gz')
+    prediction = model.predict(input_data)
+    
+    # Create a full-sized features array filled with zeros (or any nominal values) for inverse transformation
+    full_prediction = np.zeros((prediction.shape[0], 5))  # Assuming 5 was the number of features the scaler was fit on
+    full_prediction[:, 0] = prediction[:, 0]  # Assuming the prediction is the first feature
+
+    # Apply inverse transformation
+    inversed_prediction = scaler.inverse_transform(full_prediction)
+    smog_percentage = inversed_prediction[:, 0]  # Extracting the smog percentage
+    wind_direction = input_data[-1, -1, 4]  # Assuming static, example values; adapt as necessary
+    wind_speed = input_data[-1, -1, 3]  # Assuming static, example values; adapt as necessary
+
+    result = {
+        "smog_percentage": float(smog_percentage[0]),
+        "wind_direction": float(wind_direction),
+        "wind_speed": float(wind_speed)
+    }
+    return json.dumps(result)
+
+
+# Save the trained model and scaler to disk
+def save_model_and_scaler(model, scaler):
+    model.save('smog_prediction_model.h5')  # Save the model
+    joblib.dump(scaler, 'smog_scaler.gz')  # Save the scaler
+
+def main():
+    filepath = 'testdata.csv'
+    data, scaler = load_and_preprocess_data(filepath)
+    print('Data shape after preprocessing:', data.shape)  # Should be (300, 1, 5)
+    input_shape = (data.shape[1], data.shape[2])  # Should be (1, 5)
+    print('Input shape:', input_shape)
+
+    # Ensure all features are included in x and only the target variable is in y
+    x_train, x_val, y_train, y_val = train_test_split(data[:, :, :], data[:, 0, 0], test_size=0.2, random_state=42)
+    print('x_train shape:', x_train.shape)  # Should be (240, 1, 5)
+    print('y_train shape:', y_train.shape)  # Should be (240,)
+
+    model = create_advanced_model(input_shape)
+    trained_model = train_model(model, x_train, y_train, x_val, y_val)  # trained_model is now the actual model
+    save_model_and_scaler(trained_model, scaler)  # Save the actual model and scaler
+    # Example prediction (adjust as needed)
+    forecast = predict_and_format_output(trained_model, data[-1:, :, :], scaler)
+    print(forecast)
+
+if __name__ == "__main__":
+    main()

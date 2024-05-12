@@ -4,7 +4,9 @@ certifi
 charset-normalizer       
 click                   
 colorama                 
-Flask                   
+Flask 
+Flask-Cors   
+Flask-SQLAlchemy               
 google-api-core         
 google-api-python-client 
 google-auth             
@@ -25,7 +27,9 @@ pyasn1_modules
 pyparsing               
 requests                 
 requests-oauthlib        
-rsa                      
+rsa    
+SQLAlchemy                  
 uritemplate              
-urllib3                 
-Werkzeug                
+urllib3   
+validate-email-address              
+Werkzeug        
