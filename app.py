@@ -1,48 +1,73 @@
-from flask import Flask, request, jsonify
+from flask import Flask, json, request, jsonify
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from validate_email_address import validate_email
+from flask_cors import CORS
+
+from google.oauth2 import service_account
+import pandas as pd
 import numpy as np
 import joblib
 from tensorflow.keras.models import load_model
-import json
+
+# Importing forecasting functions
+from forecasting import load_and_preprocess_data, predict_and_format_output, prepare_output_scaler
 
 app = Flask(__name__)
+CORS(app)
+creds = service_account.Credentials.from_service_account_file('creds.json')
 
 # Load the model and scaler once when the server starts
 model = load_model('smog_prediction_model.keras')
 input_scaler = joblib.load('input_scaler.gz')
 output_scaler = joblib.load('output_scaler.gz')
 
-def load_and_predict(input_data):
-    # Scale the input data using the input scaler
-    input_data_scaled = input_scaler.transform(input_data.reshape(1, -1))
-    input_data_scaled = input_data_scaled.reshape(1, 1, -1)
+# Gmail account credentials
+gmail_user = "miggzc1@gmail.com"
+gmail_password = "zzek ptpi hkzf kysa"
 
-    # Predict using the model
-    prediction = model.predict(input_data_scaled)
-    
-    # Inverse transform the prediction using the output scaler
-    inversed_prediction = output_scaler.inverse_transform(prediction)
-    
-    # Formatting the output as JSON
-    labels = ["smog_percentage", "wind_direction", "wind_speed"]
-    result = {}
-    for i in range(3):
-        day_index = i + 1
-        result[f"day_{day_index}"] = {
-            labels[j]: float(inversed_prediction[0, i*3 + j]) for j in range(3)
-        }
-    return json.dumps(result)
+@app.route('/submit-form', methods=['POST'])
+def receive_form():
+    try:
+        data = request.json
+        name = data['name']
+        email = data['email']
+        message = data['message']
+
+        if not validate_email(email):
+            return jsonify({'message': 'Invalid email address'}), 400
+
+        sender_email = email
+        receiver_email = gmail_user
+
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = receiver_email
+        msg['Subject'] = 'MetroBreathe Email'
+        body = f"Name: {name}\nEmail: {email}\nMessage: {message}"
+        msg.attach(MIMEText(body, 'plain'))
+
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(gmail_user, gmail_password)
+            smtp.sendmail(sender_email, receiver_email, msg.as_string())
+
+        return jsonify({'message': 'Form received and processed successfully'}), 200
+    except Exception as e:
+        return jsonify({'message': str(e)}), 500
 
 @app.route('/predict', methods=['GET'])
 def predict():
     try:
-        predefined_data = np.array([[30.5, 22, 78, 0.6, 11]])  # Example feature set
-        result = load_and_predict(predefined_data)  # Call the prediction function
-        return jsonify(result), 200  # Convert the result into JSON format and return
+        # Load new data
+        data, _ = load_and_preprocess_data('testdata.csv')  
+        result = predict_and_format_output(model, data[-1:, :, :], output_scaler)  # Predict the latest data point
+        return jsonify(json.loads(result)), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5140)
+    app.run(debug=True)
 
     
 """
