@@ -4,28 +4,35 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from validate_email_address import validate_email
 from flask_cors import CORS
-
+import os
 from google.oauth2 import service_account
 import pandas as pd
 import numpy as np
 import joblib
 from tensorflow.keras.models import load_model
+from dotenv import load_dotenv
 
 # Importing forecasting functions
 from forecasting import load_and_preprocess_data, predict_and_format_output, prepare_output_scaler
 
+load_dotenv
+
 app = Flask(__name__)
+
+
 CORS(app)
-creds = service_account.Credentials.from_service_account_file('creds.json')
+creds_path = os.path.join(os.path.dirname(__file__), 'creds.json')
+creds = service_account.Credentials.from_service_account_file(creds_path)
 
 # Load the model and scaler once when the server starts
 model = load_model('smog_prediction_model.keras')
 input_scaler = joblib.load('input_scaler.gz')
 output_scaler = joblib.load('output_scaler.gz')
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
 
 # Gmail account credentials
-gmail_user = "miggzc1@gmail.com"
-gmail_password = "zzek ptpi hkzf kysa"
+gmail_user = os.getenv('GMAIL_USER')
+gmail_password = os.getenv('GMAIL_PASSWORD')
 
 @app.route('/submit-form', methods=['POST'])
 def receive_form():
@@ -67,13 +74,4 @@ def predict():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
-
-    
-"""
-{
-"range": "Sheet1!A2:E97"
-}
-
-flask run --host 0.0.0.0 --port 5140
-"""
+    app.run(debug=True, host='0.0.0.0', port=10000)  # Or any other port
