@@ -22,18 +22,17 @@ app = Flask(__name__)
 
 # Initialize the app with a service account, granting admin privileges
 
-firebase_config= {
-    os.getenv("FIREBASE_TYPE"),
-    os.getenv("FIREBASE_PROJECT_ID"),
-    os.getenv("FIREBASE_KEY_ID"),
-    os.getenv("FIREBASE_KEY"),
-    os.getenv("FIREBASE_CLIENT_EMAIL"),
-    os.getenv("FIREBASE_CLIENT_ID"),
-    os.getenv("FIREBASE_AUTH_URI"),
-    os.getenv("FIREBASE_TOKEN_URI"),
-    os.getenv("FIREBASE_AUTH_PROVIDER"),
-    os.getenv("FIREBASE_CLIENT_CERT"),
-    os.getenv("FIREBASE_DOMAIN")
+firebase_config = {
+    "type": os.getenv("FIREBASE_TYPE"),
+    "project_id": os.getenv("FIREBASE_PROJECT_ID"),
+    "private_key_id": os.getenv("FIREBASE_KEY_ID"),
+    "private_key": os.getenv("FIREBASE_KEY").replace('\\n', '\n'),  # Ensuring new lines are handled correctly
+    "client_email": os.getenv("FIREBASE_CLIENT_EMAIL"),
+    "client_id": os.getenv("FIREBASE_CLIENT_ID"),
+    "auth_uri": os.getenv("FIREBASE_AUTH_URI"),
+    "token_uri": os.getenv("FIREBASE_TOKEN_URI"),
+    "auth_provider_x509_cert_url": os.getenv("FIREBASE_AUTH_PROVIDER"),
+    "client_x509_cert_url": os.getenv("FIREBASE_CLIENT_CERT")
 }
 
 cred = credentials.Certificate(firebase_config)
@@ -54,6 +53,10 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
 # Gmail account credentials
 gmail_user = os.getenv('GMAIL_USER')
 gmail_password = os.getenv('GMAIL_PASSWORD')
+
+@app.route('/')
+def index():
+    return jsonify({"message": "Firebase initialized successfully!"})
 
 @app.route('/submit-form', methods=['POST'])
 def receive_form():
