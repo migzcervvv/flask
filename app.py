@@ -21,7 +21,22 @@ load_dotenv
 app = Flask(__name__)
 
 # Initialize the app with a service account, granting admin privileges
-cred = credentials.Certificate('firebase.json')
+
+firebase_config= {
+    os.getenv("FIREBASE_TYPE"),
+    os.getenv("FIREBASE_PROJECT_ID"),
+    os.getenv("FIREBASE_KEY_ID"),
+    os.getenv("FIREBASE_KEY"),
+    os.getenv("FIREBASE_CLIENT_EMAIL"),
+    os.getenv("FIREBASE_CLIENT_ID"),
+    os.getenv("FIREBASE_AUTH_URI"),
+    os.getenv("FIREBASE_TOKEN_URI"),
+    os.getenv("FIREBASE_AUTH_PROVIDER"),
+    os.getenv("FIREBASE_CLIENT_CERT"),
+    os.getenv("FIREBASE_DOMAIN")
+}
+
+cred = credentials.Certificate(firebase_config)
 firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://metrobreathe-may8-default-rtdb.asia-southeast1.firebasedatabase.app/'
 })
